@@ -1,0 +1,7 @@
+# @package _global_
+
+defaults:
+  - /algo: ppo_decoupled_estimator
+  - /env: decoupled_locomotion_stand_height_force_estimator
+
+experiment_name: TEST_DecoupledLocomotion

@@ -1,1 +1,6 @@
-# project-zenavatar-2
+# project-zenavatar
+MRSD Capstone project
+
+
+- librealsense for mac (pyrealsense conflicts on macOS)
+- 

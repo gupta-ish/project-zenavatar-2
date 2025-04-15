@@ -1,0 +1,71 @@
+# @package _global_
+
+algo:
+  _target_: humanoidverse.agents.decouple.ppo_decoupled_estimator.PPODecoupledEstimator
+  _recursive_: False
+  config:
+    num_learning_epochs: 5
+    num_mini_batches: 4
+    clip_param: 0.2
+    gamma: 0.99
+    lam: 0.95
+    value_loss_coef: 1.0
+    entropy_coef: 0.01
+    actor_learning_rate: 1.e-3 # 5e-4 # 1.e-3
+    critic_learning_rate: 1.e-3 # 5e-4 # 1.e-3
+    estimator_learning_rate: 1.e-4 # 5e-4
+    weight_decay: 1e-4
+    max_grad_norm: 1.0
+    use_clipped_value_loss: True
+    schedule: "adaptive"
+    desired_kl: 0.01
+
+    num_steps_per_env: 24
+    save_interval: 100
+
+    load_optimizer: True
+
+    init_noise_std: 0.8
+
+    num_learning_iterations: 1000000
+    init_at_random_ep_len: True
+    eval_callbacks: null
+
+    # Estimator config
+    update_estimator_only_when_stance: True # only update estimator with stance data
+    update_estimator_force_scale_threshold: 0.2 # 0 means update estimator all the time, but the estimator should only be updated when the locomotion policy is decent enough
+    use_apply_or_estimated_force_scale_threshold: 0.4 # 0 means only use estimated force, 1 means only use apply force
+    maximum_force_scale_prob: 1.0 # the probability of using maximum force scale to sample the estimated/apply force
+
+    module_dict:
+      actor: 
+        input_dim: [actor_obs, 6] # 6 is for left/right ee force
+        output_dim: [robot_action_dim]
+        layer_config:
+          type: MLP
+          hidden_dims: [512, 256, 128]
+          activation: ELU
+      critic: 
+        type: MLP
+        input_dim: [critic_obs]
+        output_dim: [1]
+        layer_config:
+          type: MLP
+          hidden_dims: [512, 256, 128]
+          activation: ELU
+      left_ee_force_estimator: 
+        input_dim: [estimator_obs]
+        output_dim: [3]
+        layer_config:
+          type: MLP
+          dropout_prob: 0.0
+          hidden_dims: [512, 256, 128]
+          activation: ELU
+      right_ee_force_estimator: 
+        input_dim: [estimator_obs]
+        output_dim: [3]
+        layer_config:
+          type: MLP
+          dropout_prob: 0.0
+          hidden_dims: [512, 256, 128]
+          activation: ELU

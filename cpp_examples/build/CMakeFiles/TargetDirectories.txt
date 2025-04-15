@@ -1,0 +1,7 @@
+/home/praj/zenavatar_realsense/cpp_examples/build/CMakeFiles/main.dir
+/home/praj/zenavatar_realsense/cpp_examples/build/CMakeFiles/edit_cache.dir
+/home/praj/zenavatar_realsense/cpp_examples/build/CMakeFiles/rebuild_cache.dir
+/home/praj/zenavatar_realsense/cpp_examples/build/CMakeFiles/list_install_components.dir
+/home/praj/zenavatar_realsense/cpp_examples/build/CMakeFiles/install.dir
+/home/praj/zenavatar_realsense/cpp_examples/build/CMakeFiles/install/local.dir
+/home/praj/zenavatar_realsense/cpp_examples/build/CMakeFiles/install/strip.dir

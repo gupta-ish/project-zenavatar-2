@@ -1,0 +1,119 @@
+# @package _global_
+
+# defaults:
+#   - reward_base
+
+rewards:
+  set_reward: Yuanhang
+  set_reward_date: 20241123
+  only_positive_rewards: False
+  reward_scales:
+      tracking_lin_vel: 1.0
+      tracking_ang_vel: 0.5
+      penalty_lin_vel_z: -2.0
+      penalty_ang_vel_xy: -0.05 # -0.5
+      penalty_orientation: -1.0 # -1.0
+      penalty_torso_orientation: -1.0
+      penalty_torques: -0.00001
+      penalty_dof_vel: -1.0e-3
+      penalty_dof_acc: -2.5e-7
+      penalty_action_rate: -0.25 # -0.5
+      # penalty_feet_contact_forces: -0.01
+      # penalty_stumble: -10.0
+      penalty_slippage: -1.0
+      penalty_contact_no_vel: -0.0 # -0.2
+      penalty_feet_ori: -2.0
+      limits_dof_pos: -5.0
+      # limits_dof_vel: -5.0
+      # limits_torque: -0.1
+      feet_air_time: 0.0
+      base_height: -10.0
+      # termination: -500.0
+      # penalty_feet_height: -5.0
+      penalty_feet_swing_height: -20.0
+      feet_heading_alignment: -0.5
+      penalty_close_feet_xy: -10.
+      # penalty_close_knees_xy: -2.
+      penalty_hip_pos: -1.0
+      penalty_ang_vel_xy_torso: -0.5 # -0.5
+      penalty_stance_dof: -5.0e-3
+      penalty_stance_feet: -2.5
+      penalty_stance_root: -1.0
+      contact: 0.18 # 0.18
+      alive: 0.15 # 0.15
+
+  # fix upper body
+  fix_upper_body: False
+  # gait period
+  gait_period: 0.9
+
+  reward_tracking_sigma:
+    lin_vel: 0.25
+    ang_vel: 0.25
+  reward_limit:
+    soft_dof_pos_limit: 0.95
+    soft_dof_vel_limit: 0.95
+    soft_torque_limit: 0.95
+  
+  close_feet_threshold: 0.17
+  locomotion_max_contact_force: 300.0
+
+  feet_height_target: 0.1 # 0.12
+  feet_height_stand: 0.025
+  desired_feet_max_height_for_this_air: 0.1
+  desired_base_height: 0.78 # 0.728
+
+  reward_penalty_curriculum: True
+  reward_initial_penalty_scale : 0.5
+  reward_min_penalty_scale: 0.0
+  reward_max_penalty_scale: 1.0
+  reward_penalty_level_down_threshold: 150
+  reward_penalty_level_up_threshold: 850
+  reward_penalty_degree: 0.00001
+  num_compute_average_epl: 10000
+
+  upper_body_motion_scale_curriculum: True
+  upper_body_motion_scale_up_threshold: 850
+  upper_body_motion_scale_down_threshold: 800
+  upper_body_motion_scale_up: 0.05
+  upper_body_motion_scale_down: 0.01
+  upper_body_motion_scale_max: 1.0
+  upper_body_motion_scale_min: 0.0
+
+  reward_penalty_reward_names: [
+    "penalty_lin_vel_z",
+    "penalty_ang_vel_xy",
+    "penalty_orientation",
+    "penalty_torso_orientation",
+    "penalty_torques",
+    "penalty_dof_acc",
+    "penalty_dof_vel",
+    "penalty_action_rate",
+    "penalty_feet_contact_forces",
+    "penalty_stumble",
+    "penalty_slippage",
+    "penalty_feet_ori",
+    "penalty_in_the_air",
+    "limits_dof_pos",
+    "limits_dof_vel",
+    "limits_torque",
+    "termination",
+    "feet_air_time",
+    "feet_max_height_for_this_air",
+    "penalty_feet_slippage",
+    "penalty_feet_height",
+    "penalty_feet_diff_height",
+    "penalty_close_feet_xy",
+    "penalty_close_knees_xy",
+    "feet_heading_alignment",
+    "penalty_ang_vel_xy_torso",
+    "penalty_lin_vel_x_feet",
+    "penalty_lin_vel_y_feet",
+    "penalty_feet_swing_height",
+    "penalty_hip_pos",
+    "penalty_stance",
+    "penalty_contact_no_vel",
+    "penalty_stance_dof",
+    "penalty_stance_feet",
+    "penalty_stance_root"]
+
