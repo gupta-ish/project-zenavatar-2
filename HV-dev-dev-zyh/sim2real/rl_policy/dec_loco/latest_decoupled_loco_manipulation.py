@@ -59,7 +59,8 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                  config, 
                  avp_config,
                  vicon_config,
-                 vicon_config_table,
+                 vicon_config_table_pick,
+                 vicon_config_table_drop,
                  model_path, 
                  use_jit,
                  rl_rate=50, 
@@ -77,8 +78,11 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         
         self.vicon_config = vicon_config
         self.vicon_g1 = Vicon(self.vicon_config)
-        self.vicon_config_table = vicon_config_table
-        self.vicon_table = Vicon(self.vicon_config_table)
+        self.vicon_config_table_pick = vicon_config_table_pick
+        self.vicon_table_pick = Vicon(self.vicon_config_table_pick)
+
+        self.vicon_config_table_drop = vicon_config_table_drop
+        self.vicon_table_drop = Vicon(self.vicon_config_table_drop)
         
         self.waist_dofs_command = np.zeros((1, 3))
         self.init_upper_body_controller()
@@ -92,7 +96,10 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         self.turn = True
         self.flag_of_moving = False
         self.flag_of_lateral_complete = False
-        print(os.getcwd())
+        self.picked = False
+        self.picked2 = False
+        self.picked3 = False
+        self.count = 0
 
         # _, self.position_init, _, _, _ = self.vicon_g1.get_vicon_data()
         # os.system("sudo bash ../../live-pose-FastSAM/docker/run_container.sh")
@@ -123,7 +130,7 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         self.speed_factor = 0.05
         self.base_z_offset = 0.8
         # Initialize waypoints
-        self.degrees = 0
+        self.degrees = -10
         self.theta = np.radians(self.degrees)
         self.EE_left_R = np.array([[np.cos(-self.theta), -np.sin(-self.theta), 0],
                                    [np.sin(-self.theta),  np.cos(-self.theta), 0],
@@ -131,10 +138,10 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         self.EE_right_R = np.array([[np.cos(self.theta), -np.sin(self.theta), 0],
                                    [np.sin(self.theta),  np.cos(self.theta), 0],
                                    [                 0,                   0, 1]])
-        self.EE_left_x = 0.30
-        self.EE_right_x = 0.30
-        self.EE_left_y = 0.23
-        self.EE_right_y = -0.23
+        self.EE_left_x = 0.25#0.3
+        self.EE_right_x = 0.25#0.3
+        self.EE_left_y = 0.28#0.23
+        self.EE_right_y = -0.28#-0.23
         self.EE_left_z = 0.08
         self.EE_right_z = 0.08
         self.update_waypoints()
@@ -271,153 +278,6 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
             (np.array(pt2_x), np.array(pt2_y), np.array(pt2_z)), \
             (np.array(obj_x), np.array(obj_y), np.array(obj_z))
 
-    def reach_pos_(self):
-        
-        #############################--ROBOT POSE FROM REAL--####################################################
-        # currently getting pose from vicon
-        # Get robot pose in world frame
-        current_time, robot_pos_w, roll_g1, pitch_g1, yaw_g1 = self.vicon_g1.get_vicon_data()
-        print("robot_pos_w: ", robot_pos_w)
-        print("yaw_g1: ", yaw_g1)
-        if current_time is None:
-            print("Warning: No Vicon data available")
-            return
-
-        # Get table pose in world frame
-        current_time_table, table_pos_w, _, _, _ = self.vicon_table.get_vicon_data()
-        table_pos_w[1] = table_pos_w[1] - 0.6
-        print("table_pos_w: ", table_pos_w)
-        if current_time_table is None:
-            print("Warning: No Vicon TABLE data available")
-            return
-
-        # Rotation from robot frame to world frame
-        yaw = yaw_g1
-        R_wr = np.array([
-            [np.cos(yaw), -np.sin(yaw)],
-            [np.sin(yaw),  np.cos(yaw)]
-        ])
-
-        # Translation from world to robot frame
-        p_wr = robot_pos_w[:2]  # just x, y
-        p_wt = table_pos_w[:2]  # just x, y
-
-        # Transform table position into robot frame
-        p_rt = R_wr.T @ (p_wt - p_wr)
-        dx_robot = p_rt[0]
-        dy_robot = p_rt[1]
-        print("dx_robot: ", dx_robot)
-        print("dy_robot: ", dy_robot)
-        # Always want to face +X in robot frame
-        goal_yaw = 0.0
-        yaw_error = np.arctan2(dy_robot, dx_robot)
-
-        # PD gains
-        Kp_lin = 1.0
-        Kp_ang = 3.0
-
-        # PD commands
-        vx = Kp_lin * dx_robot
-        vy = Kp_lin * dy_robot
-        omega = Kp_ang * yaw_error
-
-        print("vx: ", vx)
-        print("vy: ", vy)
-        print("omega: ", omega)
-        print("yaw_error: ", yaw_error)
-
-        
-        # Clamp commands
-        vx = np.clip(vx, -0.3, 0.3)
-        vy = np.clip(vy, -0.3, 0.3)
-        omega = np.clip(omega, -1.0, 1.0)
-
-        
-
-        self.lin_vel_command[0, 0] = vx
-        self.lin_vel_command[0, 1] = vy
-        self.ang_vel_command[0, 0] = omega
-
-
-
-
-        # Thresholds
-        angle_threshold = 0.1  # radians (~6 degrees)
-        distance_threshold = 0.2  # meters
-        lateral_threshold = 0.1
-
-
-        # # Compute shortest rotation needed to make yaw → 0
-        
-
-        # # position_error_X = position[0] - self.position_init[0]
-        # # print("Position error X: ", position_error_X)
-        # # position_error_Y = position[1] - self.position_init[1]
-        # # print("Position error Y: ", position_error_Y)
-
-        # if abs(yaw_error) > angle_threshold and not self.flag_of_moving:
-        #     # Rotate in place to face +X
-        #     self.lin_vel_command[0, :] = 0.
-        #     if yaw_error > 0:
-        #         self.ang_vel_command[0, 0] = 0.3
-        #         print("Rotating left to face +X")
-        #     else:
-        #         self.ang_vel_command[0, 0] = -0.3
-        #         print("Rotating right to face +X")
-
-        #     # self.lin_vel_command[0, 0] = position_error_X * 0.1
-        #     # self.lin_vel_command[0, 1] = position_error_Y * 0.1
-
-        # else:
-        #     # Yaw is aligned with +X, start moving toward goal
-        #     self.ang_vel_command[0, :] = 0.
-
-        #     dx = x_goal - x
-        #     dy = y_goal - y
-        #     distance = math.hypot(dx, dy)
-
-        #     ####################
-
-        #     if x > x_goal + lateral_threshold:
-        #         self.lin_vel_command[0, 1] = 0.3  # Move left
-        #         print("Moving left to correct lateral error")
-        #     elif x < x_goal - lateral_threshold:
-        #         self.lin_vel_command[0, 1] = -0.3  # Move right
-        #         print("Moving right to correct lateral error")
-        #     else:
-        #         self.lin_vel_command[0, 1] = 0.
-
-        #     ############
-
-        #     if distance > distance_threshold:
-        #         self.lin_vel_command[0, 0] = 0.4  # Move forward
-        #         print("Moving forward toward goal")
-        #     else:
-        #         self.lin_vel_command[0, :] = 0.
-        #         self.ang_vel_command[0, :] = 0.
-                # self.flag_of_moving = True
-        #         print("Goal reached — stopping")
-        
-            
-
-        # # Trigger something once goal is reached
-        if self.flag_of_moving:
-            self.reach = False
-            # os.system("../../../live-pose-FastSAM/docker/run_container.sh")
-
-            #### run fpose here
-            self.stand_command = 1 - self.stand_command
-            if self.stand_command == 0:
-                self.ang_vel_command[0, 0] = 0.
-                self.lin_vel_command[0, 0] = 0.
-                self.lin_vel_command[0, 1] = 0.
-                self.logger.info(colored("Stance command", "blue"))
-            else:
-                self.base_height_command[0, 0] = self.desired_base_height
-                self.logger.info(colored("Walk command", "blue"))
-
-            self.logger.info("Reached goal point. You can trigger next state here.")
-    
     def reach_pos(self):
         
         #############################--ROBOT POSE FROM REAL--####################################################
@@ -433,11 +293,12 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         x, y = pos_g1[0], pos_g1[1]          
         orien_g1 = np.array([roll_g1, pitch_g1, yaw_g1])
         yaw = orien_g1[2]
+        # yaw = np.radians(yaw)
 
         print(f"robot position: {pos_g1}")
         print(f"robot orientation: {orien_g1}")
 
-        current_time_table, table_position, r_table, p_table, y_table = self.vicon_table.get_vicon_data()
+        current_time_table, table_position, r_table, p_table, y_table = self.vicon_table_pick.get_vicon_data()
 
         # if current_time_table is None:
         #     print("Warning: No Vicon data from table available")
@@ -445,7 +306,7 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         print( "Table Position:", table_position)
         print( "Table Orientation:", y_table)
         x_goal = table_position[0]
-        y_goal = table_position[1] - 0.6
+        y_goal = table_position[1] - 0.4
         # # theta_goal_deg = y_table  
 
         ##############################--ROBOT POSE FROM SIM--#######################################################
@@ -600,30 +461,39 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         
 
         # Thresholds
-        angle_threshold = 0.35  # radians (~6 degrees)
+        angle_threshold = 0.2  # radians (~6 degrees)
         distance_threshold = 0.2  # meters
-        lateral_threshold = 0.1
+        lateral_threshold = 0.05
 
         # --- Step 1: Face +X direction (yaw = 0) ---
-        goal_yaw = 1.57  # Always want to face +X
+        goal_yaw = 1.75  # Always want to face +X
 
         # Compute shortest rotation needed to make yaw → 0
-        # yaw_error = np.arctan2(np.sin(goal_yaw - yaw), np.cos(goal_yaw - yaw))
-        yaw_error = goal_yaw - yaw
-        print("YAW ERROR: ", yaw_error)
+        yaw_error = np.arctan2(np.sin(goal_yaw - yaw), np.cos(goal_yaw - yaw))
+        # yaw_error = goal_yaw - yaw
+        print(" YAW error: ", yaw_error)
+
+        # position_error_X = position[0] - self.position_init[0]
+        # print("Position error X: ", position_error_X)
+        # position_error_Y = position[1] - self.position_init[1]
+        # print("Position error Y: ", position_error_Y)
+
         if abs(yaw_error) > angle_threshold and not self.flag_of_moving:
             # Rotate in place to face +X
-            self.lin_vel_command[0, :] = 0.
+            self.lin_vel_command[0, :] = -0.2
             if yaw_error > 0:
-                self.ang_vel_command[0, 0] = 0.2
+                self.ang_vel_command[0, 0] = 1
                 print("Rotating left to face +X")
             else:
-                self.ang_vel_command[0, 0] = -0.2
+                self.ang_vel_command[0, 0] = -0.5
                 print("Rotating right to face +X")
+
+            # self.lin_vel_command[0, 0] = position_error_X * 0.1
+            # self.lin_vel_command[0, 1] = position_error_Y * 0.1
 
         else:
             # Yaw is aligned with +X, start moving toward goal
-            self.ang_vel_command[0, :] = 0.
+            self.ang_vel_command[0, 0] = 0.17
 
             dx = x_goal - x
             dy = y_goal - y
@@ -635,7 +505,7 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                 self.lin_vel_command[0, 1] = 0.3  # Move left
                 print("Moving left to correct lateral error")
             elif x < x_goal - lateral_threshold:
-                self.lin_vel_command[0, 1] = -0.3  # Move right
+                self.lin_vel_command[0, 1] = -0.5  # Move right
                 print("Moving right to correct lateral error")
             else:
                 self.lin_vel_command[0, 1] = 0.
@@ -656,6 +526,7 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         # Trigger something once goal is reached
         if self.flag_of_moving:
             self.reach = False
+            self.flag_of_moving = False
             # os.system("../../../live-pose-FastSAM/docker/run_container.sh")
 
             #### run fpose here
@@ -670,6 +541,348 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                 self.logger.info(colored("Walk command", "blue"))
 
             self.logger.info("Reached goal point. You can trigger next state here.")
+
+    def reach_pos_2(self):
+        
+       
+        
+            #############################--ROBOT POSE FROM REAL--####################################################
+        # currently getting pose from vicon
+        current_time, position, roll_g1, pitch_g1, yaw_g1 = self.vicon_g1.get_vicon_data()
+
+        if current_time is None:
+            print("Warning: No Vicon data available")
+            return
+
+        
+        pos_g1 = position 
+        x, y = pos_g1[0], pos_g1[1]          
+        orien_g1 = np.array([roll_g1, pitch_g1, yaw_g1])
+        yaw = orien_g1[2]
+        # yaw = np.radians(yaw)
+
+        print(f"robot position: {pos_g1}")
+        print(f"robot orientation: {orien_g1}")
+
+        current_time_table, table_position, r_table, p_table, y_table = self.vicon_table_pick.get_vicon_data()
+
+        # if current_time_table is None:
+        #     print("Warning: No Vicon data from table available")
+        #     return
+        print( "Table Position:", table_position)
+        print( "Table Orientation:", y_table)
+        x_goal = table_position[0]
+        y_goal = table_position[1] - 1.5
+        # # theta_goal_deg = y_table  
+        print("y_goal:- ", y_goal)
+
+        
+
+        # Thresholds
+        angle_threshold = 0.3  # radians (~6 degrees)
+        distance_threshold = 0.2  # meters
+        lateral_threshold = 0.05
+
+        # --- Step 1: Face +X direction (yaw = 0) ---
+        goal_yaw = 1.57  # Always want to face +X
+
+        # Compute shortest rotation needed to make yaw → 0
+        yaw_error = np.arctan2(np.sin(goal_yaw - yaw), np.cos(goal_yaw - yaw))
+        # yaw_error = goal_yaw - yaw
+        # print(" YAW error: ", yaw_error)
+
+        if abs(yaw_error) > angle_threshold and not self.flag_of_moving:
+            # Rotate in place to face +X
+            self.lin_vel_command[0, :] = -0.2
+            if yaw_error > 0:
+                self.ang_vel_command[0, 0] = 1
+                print("Rotating left to face +X")
+            else:
+                self.ang_vel_command[0, 0] = -0.5
+                print("Rotating right to face +X")
+
+            # self.lin_vel_command[0, 0] = position_error_X * 0.1
+            # self.lin_vel_command[0, 1] = position_error_Y * 0.1
+
+        else:
+            # Yaw is aligned with +X, start moving toward goal
+            self.ang_vel_command[0, 0] = 0.17
+
+            dx = x_goal - x
+            dy = y_goal - y
+            distance = math.hypot(dx, dy)
+
+            ####################
+
+            if x > x_goal + lateral_threshold:
+                self.lin_vel_command[0, 1] = 0.3  # Move left
+                print("Moving left to correct lateral error")
+            elif x < x_goal - lateral_threshold:
+                self.lin_vel_command[0, 1] = -0.5  # Move right
+                print("Moving right to correct lateral error")
+            else:
+                self.lin_vel_command[0, 1] = 0.
+
+            ############
+
+            if distance > distance_threshold:
+                self.lin_vel_command[0, 0] = -0.3  # Move backward
+                print("Moving backward toward goal")
+            else:
+                self.lin_vel_command[0, :] = 0.
+                self.ang_vel_command[0, :] = 0.
+                self.flag_of_moving = True
+                print("Goal reached — stopping")
+            
+                
+
+            # Trigger something once goal is reached
+        if self.flag_of_moving:
+            # self.flag_of_moving = False
+            self.picked = False
+            self.flag_of_moving = False
+            # self.picked2 = True
+            self.stand_command = 1 - self.stand_command
+            if self.stand_command == 0:
+                self.ang_vel_command[0, 0] = 0.
+                self.lin_vel_command[0, 0] = 0.
+                self.lin_vel_command[0, 1] = 0.
+                self.logger.info(colored("Stance command", "blue"))
+            else:
+                self.base_height_command[0, 0] = self.desired_base_height
+                self.logger.info(colored("Walk command", "blue"))
+
+            self.logger.info("Reached goal point. You can trigger next state here.")
+
+
+    def reach_pos_3(self):
+        # if self.picked2 == True:
+        
+        #############################--ROBOT POSE FROM REAL--####################################################
+        # currently getting pose from vicon
+        current_time, position, roll_g1, pitch_g1, yaw_g1 = self.vicon_g1.get_vicon_data()
+
+        if current_time is None:
+            print("Warning: No Vicon data available")
+            return
+
+        
+        pos_g1 = position 
+        x, y = pos_g1[0], pos_g1[1]          
+        orien_g1 = np.array([roll_g1, pitch_g1, yaw_g1])
+        yaw = orien_g1[2]
+        # yaw = np.radians(yaw)
+
+        print(f"robot position: {pos_g1}")
+        print(f"robot orientation: {orien_g1}")
+
+        current_time_table, table_position, r_table, p_table, y_table = self.vicon_table_drop.get_vicon_data()
+
+        # if current_time_table is None:
+        #     print("Warning: No Vicon data from table available")
+        #     return
+        print( "Table Position:", table_position)
+        print( "Table Orientation:", y_table)
+        x_goal = table_position[0] - 0.5
+        y_goal = table_position[1] - 0.4
+        # # theta_goal_deg = y_table  
+
+        
+
+        # Thresholds
+        angle_threshold = 0.2  # radians (~6 degrees)
+        distance_threshold = 0.2  # meters
+        lateral_threshold = 0.1
+
+        # --- Step 1: Face +X direction (yaw = 0) ---
+        goal_yaw = -0.19  # Always want to face +X
+
+        # Compute shortest rotation needed to make yaw → 0
+        yaw_error = np.arctan2(np.sin(goal_yaw - yaw), np.cos(goal_yaw - yaw))
+        # yaw_error = goal_yaw - yaw
+        print(" YAW error: ", yaw_error)
+
+        if abs(yaw_error) > angle_threshold and not self.flag_of_moving:
+            # Rotate in place to face +X
+            self.lin_vel_command[0, :] = -0.2
+            if yaw_error > 0:
+                self.ang_vel_command[0, 0] = 1
+                print("reach_pos_3: Rotating left to face +X")
+            else:
+                self.ang_vel_command[0, 0] = -0.5
+                print("reach_pos_3: Rotating right to face +X")
+
+            # self.lin_vel_command[0, 0] = position_error_X * 0.1
+            # self.lin_vel_command[0, 1] = position_error_Y * 0.1
+
+        else:
+            # Yaw is aligned with +X, start moving toward goal
+            self.ang_vel_command[0, 0] = 0.17
+
+            dx = x_goal - x
+            dy = y_goal - y
+            distance = math.hypot(dx, dy)
+
+            ####################
+
+            if abs(y) > abs(y_goal) + lateral_threshold:
+                self.lin_vel_command[0, 1] = 0.3  # Move left
+                print("reach_pos_3: Moving left to correct lateral error")
+            elif abs(y) < abs(y_goal) - lateral_threshold:
+                self.lin_vel_command[0, 1] = -0.5  # Move right
+                print("reach_pos_3: Moving right to correct lateral error")
+            else:
+                self.lin_vel_command[0, 1] = 0.
+
+            ############
+
+            if distance > distance_threshold:
+                self.lin_vel_command[0, 0] = 0.4  # Move forward
+                print("reach_pos_3: Moving forward toward goal")
+            else:
+                self.lin_vel_command[0, :] = 0.
+                self.ang_vel_command[0, :] = 0.
+                self.flag_of_moving = True
+                print("reach_pos_3: Goal reached — stopping")
+        
+            
+
+        # Trigger something once goal is reached
+        if self.flag_of_moving:
+            self.reach = False
+            self.picked = False
+            self.picked2 = False
+            self.flag_of_moving = False
+            
+            # os.system("../../../live-pose-FastSAM/docker/run_container.sh")
+
+            #### run fpose here
+            self.stand_command = 1 - self.stand_command
+            if self.stand_command == 0:
+                self.ang_vel_command[0, 0] = 0.
+                self.lin_vel_command[0, 0] = 0.
+                self.lin_vel_command[0, 1] = 0.
+                self.logger.info(colored("Stance command", "blue"))
+            else:
+                self.base_height_command[0, 0] = self.desired_base_height
+                self.logger.info(colored("Walk command", "blue"))
+
+            self.logger.info("Reached goal point. You can trigger next state here.")
+
+    def reach_pos_4(self):
+        # if self.picked2 == True:
+        
+        #############################--ROBOT POSE FROM REAL--####################################################
+        # currently getting pose from vicon
+        current_time, position, roll_g1, pitch_g1, yaw_g1 = self.vicon_g1.get_vicon_data()
+
+        if current_time is None:
+            print("Warning: No Vicon data available")
+            return
+
+        
+        pos_g1 = position 
+        x, y = pos_g1[0], pos_g1[1]          
+        orien_g1 = np.array([roll_g1, pitch_g1, yaw_g1])
+        yaw = orien_g1[2]
+        # yaw = np.radians(yaw)
+
+        print(f"robot position: {pos_g1}")
+        print(f"robot orientation: {orien_g1}")
+
+        current_time_table, table_position, r_table, p_table, y_table = self.vicon_table_drop.get_vicon_data()
+
+        # if current_time_table is None:
+        #     print("Warning: No Vicon data from table available")
+        #     return
+        print( "Table Position:", table_position)
+        print( "Table Orientation:", y_table)
+        x_goal = table_position[0] - 1.4
+        y_goal = table_position[1] - 0.4
+        # # theta_goal_deg = y_table  
+
+        
+
+        # Thresholds
+        angle_threshold = 0.2  # radians (~6 degrees)
+        distance_threshold = 0.2  # meters
+        lateral_threshold = 0.2
+
+        # --- Step 1: Face +X direction (yaw = 0) ---
+        goal_yaw = 0  # Always want to face +X
+
+        # Compute shortest rotation needed to make yaw → 0
+        yaw_error = np.arctan2(np.sin(goal_yaw - yaw), np.cos(goal_yaw - yaw))
+        # yaw_error = goal_yaw - yaw
+        print(" YAW error: ", yaw_error)
+
+        if abs(yaw_error) > angle_threshold and not self.flag_of_moving:
+            # Rotate in place to face +X
+            self.lin_vel_command[0, :] = -0.2
+            if yaw_error > 0:
+                self.ang_vel_command[0, 0] = 1
+                print("reach_pos_4: Rotating left to face +X")
+            else:
+                self.ang_vel_command[0, 0] = -0.5
+                print("reach_pos_4: Rotating right to face +X")
+
+            # self.lin_vel_command[0, 0] = position_error_X * 0.1
+            # self.lin_vel_command[0, 1] = position_error_Y * 0.1
+
+        else:
+            # Yaw is aligned with +X, start moving toward goal
+            self.ang_vel_command[0, 0] = 0.17
+
+            dx = x_goal - x
+            dy = y_goal - y
+            distance = math.hypot(dx, dy)
+
+            ####################
+
+            if abs(y) > abs(y_goal) + lateral_threshold:
+                self.lin_vel_command[0, 1] = 0.3  # Move left
+                print("reach_pos_4: Moving left to correct lateral error")
+            elif abs(y) < abs(y_goal) - lateral_threshold:
+                self.lin_vel_command[0, 1] = -0.5  # Move right
+                print("reach_pos_4: Moving right to correct lateral error")
+            else:
+                self.lin_vel_command[0, 1] = 0.
+
+            ############
+
+            if distance > distance_threshold:
+                self.lin_vel_command[0, 0] = -0.2  # Move forward
+                print("reach_pos_4: Moving backward toward goal")
+            else:
+                self.lin_vel_command[0, :] = 0.
+                self.ang_vel_command[0, :] = 0.
+                self.flag_of_moving = True
+                print("reach_pos_4: Goal reached — stopping")
+        
+            
+
+        # Trigger something once goal is reached
+        if self.flag_of_moving:
+            self.reach = False
+            self.picked = False
+            self.picked2 = False
+            self.picked3 = False
+            
+            # os.system("../../../live-pose-FastSAM/docker/run_container.sh")
+
+            #### run fpose here
+            self.stand_command = 1 - self.stand_command
+            if self.stand_command == 0:
+                self.ang_vel_command[0, 0] = 0.
+                self.lin_vel_command[0, 0] = 0.
+                self.lin_vel_command[0, 1] = 0.
+                self.logger.info(colored("Stance command", "blue"))
+            else:
+                self.base_height_command[0, 0] = self.desired_base_height
+                self.logger.info(colored("Walk command", "blue"))
+
+            self.logger.info("Reached goal point. You can trigger next state here.")
+
 
         
 
@@ -702,33 +915,45 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                                 [np.sin(self.theta),  np.cos(self.theta), 0],
                                 [                 0,                   0, 1]])
 
-        # old_pt1 = np.array([0.2, 0.2, 0.23])
-        # old_pt2 = np.array([0.2, -0.2, 0.23])
-        
+        old_pt1 = np.array([0.32, 0.25, 0.05])
+        old_pt2 = np.array([0.32, -0.25, 0.05]) 
+
+        old_pt1_tup = (np.array([old_pt1[0]]), np.array([old_pt1[1]]), np.array([old_pt1[2]]))
+        old_pt2_tup = (np.array([old_pt2[0]]), np.array([old_pt2[1]]), np.array([old_pt2[2]]))
+
+         
         if self.st == 1:
             print(f'reading traj data from {fpose_file_path}')
-            
+            check_box = True
             pt1_coords, pt2_coords, obj_coords = self.read_trajectory_data(fpose_file_path, num_lines=23)
-            # if len(pt2_coords) > 0 and len(pt1_coords) > 0:
-            if pt2_coords[1]<0:
-                pass
-            elif pt1_coords[1]<0:
-                pt1_temp = pt1_coords
-                pt1_coords = pt2_coords
-                pt2_coords = pt1_temp
-            # else:
-            #     pt1_coords, pt2_coords = old_pt1, old_pt2
+            if (pt1_coords[0] > 1.5 or pt1_coords[1] > 1.5 or pt1_coords[2] > 0.8 or pt2_coords[0] > 1.5 or pt2_coords[1] > 0.2 or pt2_coords[2] > 0.8 \
+                or pt1_coords[0] < 0 or pt1_coords[1] < -0.2 or pt1_coords[2] < -0.5 or pt2_coords[0] < 0 or pt2_coords[1] < -1.5 or pt2_coords[2] < -0.5):
+                check_box = False
+                print("check_box: ", check_box)
+
+            if (len(pt2_coords[0]) > 0 and len(pt1_coords[0]) and (check_box)) > 0:
+                if pt2_coords[1]<0:
+                    pass
+                elif pt1_coords[1]<0:
+                    pt1_temp = pt1_coords
+                    pt1_coords = pt2_coords
+                    pt2_coords = pt1_temp
+            else:
+                pt1_coords, pt2_coords = old_pt1_tup, old_pt2_tup
 
 
             print("pt1 ",pt1_coords, "    pt2", pt2_coords)
+            print("pt1 and pt2 size: ", len(pt1_coords[0]), len(pt2_coords[0]))
             #reach
             # self.goal_pose_L_1 = pin.SE3(np.eye(3), np.array([pt1_coords[0]+0.05, pt1_coords[1], pt1_coords[2]]))
             # self.goal_pose_R_1 = pin.SE3(np.eye(3), np.array([pt2_coords[0]+0.05, pt2_coords[1], pt2_coords[2]]))
-            self.goal_pose_L_1 = pin.SE3(self.EE_left_R, np.array([pt1_coords[0]+0.05, pt1_coords[1], pt1_coords[2]]))
-            self.goal_pose_R_1 = pin.SE3(self.EE_right_R, np.array([pt2_coords[0]+0.05, pt2_coords[1], pt2_coords[2]]))
+            self.goal_pose_L_1 = pin.SE3(self.EE_left_R, np.array([pt1_coords[0]+0.05, pt1_coords[1], pt1_coords[2]-0.02]))
+            self.goal_pose_R_1 = pin.SE3(self.EE_right_R, np.array([pt2_coords[0]+0.05, pt2_coords[1], pt2_coords[2]-0.02]))
             left_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(L_ee_pose, self.goal_pose_L_1, 2)
             right_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(R_ee_pose, self.goal_pose_R_1, 2)
             old_pt1, old_pt2 = pt1_coords, pt2_coords
+            self.MP_waypoints_left = left_ee_trajectory
+            self.MP_waypoints_right = right_ee_trajectory
         # qpos = self.robot_state_data[:, 7:7+self.num_dofs]
 
         elif self.st == 2:
@@ -748,11 +973,13 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
             self.goal_pose_R_2 = pin.SE3(self.EE_right_R, np.array([self.goal_pose_R_1.translation[0], -0.03, self.goal_pose_L_1.translation[2]]))
             left_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(L_ee_pose, self.goal_pose_L_2, 2)
             right_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(R_ee_pose, self.goal_pose_R_2, 2)
+            self.MP_waypoints_left = left_ee_trajectory
+            self.MP_waypoints_right = right_ee_trajectory
 
         elif self.st == 3:
             # pickup
-            temp_goal_pose_L_3_y = self.goal_pose_L_2.translation[2] + 0.2
-            temp_goal_pose_R_3_y = self.goal_pose_R_2.translation[2] + 0.2
+            temp_goal_pose_L_3_y = self.goal_pose_L_2.translation[2] + 0.25
+            temp_goal_pose_R_3_y = self.goal_pose_R_2.translation[2] + 0.25
 
             # goal_pose_L_3 = pin.SE3(np.eye(3), np.array([self.goal_pose_L_2.translation[0], self.goal_pose_L_2.translation[1], temp_goal_pose_L_3_y]))
             # goal_pose_R_3 = pin.SE3(np.eye(3), np.array([self.goal_pose_R_2.translation[0], self.goal_pose_R_2.translation[1], temp_goal_pose_R_3_y]))
@@ -762,18 +989,34 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
             goal_pose_R_3 = pin.SE3(self.EE_right_R, np.array([self.goal_pose_R_2.translation[0], self.goal_pose_R_2.translation[1], temp_goal_pose_R_3_y]))
             left_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(L_ee_pose, goal_pose_L_3, 2)
             right_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(R_ee_pose, goal_pose_R_3, 2)
+            self.MP_waypoints_left = left_ee_trajectory
+            self.MP_waypoints_right = right_ee_trajectory
+
         elif self.st == 4:
             #drop (go back to the grasp goal pose)
-            self.goal_pose_L_2 = pin.SE3(self.EE_left_R, np.array([self.goal_pose_L_1.translation[0], 0.03, self.goal_pose_L_1.translation[2]]))
-            self.goal_pose_R_2 = pin.SE3(self.EE_right_R, np.array([self.goal_pose_R_1.translation[0], -0.03, self.goal_pose_L_1.translation[2]]))
+            # goal_pose_L_4 = pin.SE3(self.EE_left_R, np.array([0.55, self.goal_pose_L_2.translation[1], self.goal_pose_L_2.translation[2] + 0.25]))
+            # goal_pose_R_4 = pin.SE3(self.EE_right_R, np.array([0.1, self.goal_pose_R_2.translation[1], self.goal_pose_R_2.translation[2] + 0.25]))
+            # left_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(L_ee_pose, goal_pose_L_4, 2)
+            # right_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(R_ee_pose, goal_pose_R_4, 2)
+            # self.MP_waypoints_left = left_ee_trajectory
+            # self.MP_waypoints_right = right_ee_trajectory
+
+            
+            self.goal_pose_L_2 = pin.SE3(self.EE_left_R, np.array([0.4, 0.03, self.goal_pose_L_1.translation[2] - 0.15]))
+            self.goal_pose_R_2 = pin.SE3(self.EE_right_R, np.array([0.4, -0.03, self.goal_pose_L_1.translation[2] - 0.15]))
             left_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(L_ee_pose, self.goal_pose_L_2, 2)
             right_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(R_ee_pose, self.goal_pose_R_2, 2)
+            self.MP_waypoints_left = left_ee_trajectory
+            self.MP_waypoints_right = right_ee_trajectory
+
         elif self.st == 5:
             #unsqueeze
-            self.goal_pose_L_2 = pin.SE3(self.EE_left_R, np.array([self.goal_pose_L_1.translation[0], 0.2, self.goal_pose_L_1.translation[2]]))
-            self.goal_pose_R_2 = pin.SE3(self.EE_right_R, np.array([self.goal_pose_R_1.translation[0], -0.2, self.goal_pose_L_1.translation[2]]))
+            self.goal_pose_L_2 = pin.SE3(self.EE_left_R, np.array([0.4, 0.2, self.goal_pose_L_1.translation[2]- 0.15]))
+            self.goal_pose_R_2 = pin.SE3(self.EE_right_R, np.array([0.4, -0.2, self.goal_pose_L_1.translation[2]- 0.15]))
             left_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(L_ee_pose, self.goal_pose_L_2, 2)
             right_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(R_ee_pose, self.goal_pose_R_2, 2)
+            self.MP_waypoints_left = left_ee_trajectory
+            self.MP_waypoints_right = right_ee_trajectory
 
         else:
             return
@@ -784,14 +1027,14 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
         # left_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(L_ee_pose, goal_pose_L, 2)
         # right_ee_trajectory = self.upper_body_controller.generate_waypoints_SE(R_ee_pose, goal_pose_R, 2)
 
-        self.MP_waypoints_left = left_ee_trajectory
-        self.MP_waypoints_right = right_ee_trajectory
+        # self.MP_waypoints_left = left_ee_trajectory
+        # self.MP_waypoints_right = right_ee_trajectory
 
-        for i, pose in enumerate(left_ee_trajectory):
-            print(f"Left Waypoint {i} translation:", pose.translation)
+        # for i, pose in enumerate(left_ee_trajectory):
+        #     print(f"Left Waypoint {i} translation:", pose.translation)
 
-        for i, pose in enumerate(right_ee_trajectory):
-            print(f"Right Waypoint {i} translation:", pose.translation)
+        # for i, pose in enumerate(right_ee_trajectory):
+        #     print(f"Right Waypoint {i} translation:", pose.translation)
     
     def run(self):
         total_inference_cnt = 0
@@ -811,7 +1054,7 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                     self.EE_right_y = self.right_wrist[1, 3] + 0.05
                     self.EE_left_z = self.left_wrist[2, 3]
                     self.EE_right_z = self.right_wrist[2, 3]
-                    self.update_waypoints()
+                    # self.update_waypoints()
                     # tv_resized_image = cv2.resize(self.tv_img_array, (self.tv_img_shape[1] // 2, self.tv_img_shape[0] // 2))
                     # cv2.imshow("record image", tv_resized_image)
                     # key = cv2.waitKey(1) & 0xFF
@@ -820,9 +1063,15 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                 total_inference_cnt += 1
                 if self.reach:
                     self.reach_pos()
+                if self.picked:
+                    self.reach_pos_2()
+                if self.picked2:
+                    self.reach_pos_3()
+                if self.picked3:
+                    self.reach_pos_4()
                 self.rate.sleep()
-                if self.test_:
-                    self.test()
+                # if self.test_:
+                #     self.test()
         except KeyboardInterrupt:
             pass
     
@@ -1120,15 +1369,16 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                     # self.MP_waypoints_left, self.MP_waypoints_right = self.MP.generate_waypoints()
                     self.logger.info(colored("Motion Planner Enabled", "green"))
             elif cur_key == "B+X":
-                print("planner enabled")
+                # self.reach = True
                 self.toggle_forward = not self.toggle_forward
                 self.joystick_override_enabled = not self.joystick_override_enabled
                 if self.toggle_forward:
                     self.reach = True
+                    self.flag_of_moving = False
                     self.logger.info(colored("Starting to REACH", "green"))
-            elif cur_key == "B+X" and self.reach == True:
-                print("planner disabled")
-                self.flag_of_moving = True
+                else:
+                    self.flag_of_moving = True
+                    self.logger.info(colored("End REACH", "red"))
             elif cur_key == "A+B":
                 self.command_sender.kp_level = 1.0
                 self.kp_level_lower_body = 0.0
@@ -1138,6 +1388,36 @@ class DecoupledLocomotionManipulationForcePolicy(DecoupledLocomotionManipulation
                     self.command_sender.robot_kp[i] = self.robot.MOTOR_KP[i] * self.command_sender.kp_level
                 self.logger.info(colored(f"Debug kp level: {self.command_sender.kp_level}", "green"))
                 self.logger.info(colored(f"Debug kp: {self.command_sender.robot_kp}", "green"))
+            elif cur_key == "Y+select":
+                self.toggle_forward = not self.toggle_forward
+                self.joystick_override_enabled = not self.joystick_override_enabled
+                if self.toggle_forward:
+                    self.picked = True
+                    self.flag_of_moving = False
+                    self.logger.info(colored("Starting to REACH", "green"))
+                else:
+                    self.flag_of_moving = True
+                    self.logger.info(colored("End REACH", "red"))
+            elif cur_key == "B+select":
+                self.toggle_forward = not self.toggle_forward
+                self.joystick_override_enabled = not self.joystick_override_enabled
+                if self.toggle_forward:
+                    self.picked2 = True
+                    self.flag_of_moving = False
+                    self.logger.info(colored("Starting to REACH", "green"))
+                else:
+                    self.flag_of_moving = True
+                    self.logger.info(colored("End REACH", "red"))
+            elif cur_key == "A+select":
+                self.toggle_forward = not self.toggle_forward
+                self.joystick_override_enabled = not self.joystick_override_enabled
+                if self.toggle_forward:
+                    self.picked3 = True
+                    self.flag_of_moving = False
+                    self.logger.info(colored("Starting to REACH", "green"))
+                else:
+                    self.flag_of_moving = True
+                    self.logger.info(colored("End REACH", "red"))
 
 class Vicon():
     def __init__(self, cfg):
@@ -1217,7 +1497,8 @@ if __name__ == "__main__":
 
     # parser = argparse.ArgumentParser(description='Mocap Publisher')
     parser.add_argument('--config_vicon', type=str, default='config/mocap_g1_zenavatar.yaml', help='motion capture configuration file')
-    parser.add_argument('--config_vicon_table', type=str, default='config/table.yaml', help='motion capture configuration file')
+    parser.add_argument('--config_vicon_table_pick', type=str, default='config/pick_table.yaml', help='motion capture configuration file')
+    parser.add_argument('--config_vicon_table_drop', type=str, default='config/drop_table.yaml', help='motion capture configuration file')
     args = parser.parse_args()
 
     with open(args.config) as file:
@@ -1226,13 +1507,16 @@ if __name__ == "__main__":
         avp_config = yaml.load(file, Loader=yaml.FullLoader)
     with open(args.config_vicon, 'r') as file:
         vicon_config = yaml.load(file, Loader=yaml.FullLoader)
-    with open(args.config_vicon_table, 'r') as file:
-        vicon_config_table = yaml.load(file, Loader=yaml.FullLoader)
+    with open(args.config_vicon_table_pick, 'r') as file:
+        vicon_config_table_pick = yaml.load(file, Loader=yaml.FullLoader)
+    with open(args.config_vicon_table_drop, 'r') as file:
+        vicon_config_table_drop = yaml.load(file, Loader=yaml.FullLoader)
 
     policy = DecoupledLocomotionManipulationForcePolicy(config=config, 
                                                         avp_config=avp_config,
                                                         vicon_config=vicon_config,
-                                                        vicon_config_table=vicon_config_table,
+                                                        vicon_config_table_pick =vicon_config_table_pick,
+                                                        vicon_config_table_drop =vicon_config_table_drop,
                                                         model_path=args.model_path, 
                                                         use_jit=args.use_jit,
                                                         rl_rate=50, 
